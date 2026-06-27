@@ -7,7 +7,7 @@ from typing import Any
 
 
 PLAN_TYPE = "WAN22_SAMPLING_PLAN"
-PLAN_VERSION = 3
+PLAN_VERSION = 4
 
 TASK_PROFILES = {
     "T2V": {
@@ -41,6 +41,13 @@ PRIORITY_OPTIONS = [
     PRIORITY_EVEN,
     PRIORITY_MOTION,
     PRIORITY_DETAIL,
+]
+
+HANDOFF_DIRECT = "Direct Latent"
+HANDOFF_PROGRESSIVE = "Progressive Transcode"
+HANDOFF_OPTIONS = [
+    HANDOFF_DIRECT,
+    HANDOFF_PROGRESSIVE,
 ]
 
 CURVE_PROFILE_NATIVE = "wan_native"
@@ -240,6 +247,33 @@ def project_stage_steps(
     return steps_high, steps_low, high_budget, low_budget
 
 
+def project_handoff_steps(
+    *,
+    accelerated_steps: int,
+    full_steps: int,
+    acceleration: str,
+    high_range_share: float,
+    handoff_mode: str,
+) -> tuple[int, int, int, int]:
+    if handoff_mode == HANDOFF_DIRECT:
+        return project_stage_steps(
+            accelerated_steps=accelerated_steps,
+            full_steps=full_steps,
+            acceleration=acceleration,
+            high_range_share=high_range_share,
+        )
+
+    if handoff_mode != HANDOFF_PROGRESSIVE:
+        raise ValueError(f"Unknown Wan 2.2 handoff mode: {handoff_mode}")
+
+    strategy_budget = (
+        full_steps if acceleration == ACCELERATION_NONE else accelerated_steps
+    )
+    steps_high = _rounded_stage_share(strategy_budget, high_range_share)
+    steps_low = strategy_budget - steps_high
+    return steps_high, steps_low, strategy_budget, strategy_budget
+
+
 def _interpolate(values: Sequence[float], position: float) -> float:
     last = len(values) - 1
     if position <= 0.0:
@@ -394,6 +428,7 @@ def optimize_shift(
 def _warnings_for_plan(
     *,
     acceleration: str,
+    handoff_mode: str,
     steps: int,
     steps_high: int,
     steps_low: int,
@@ -431,7 +466,22 @@ def _warnings_for_plan(
     elif not accelerate_low and steps_low < 3:
         warnings.append("The unaccelerated low-noise stage has very few steps.")
 
+    if handoff_mode == HANDOFF_PROGRESSIVE:
+        warnings.append(
+            "Progressive Transcode uses a clean high-stage output and re-noises "
+            "the re-encoded latent at the low-stage handoff sigma."
+        )
+        if acceleration != ACCELERATION_NONE:
+            warnings.append(
+                "Progressive Transcode allocates the accelerated strategy budget "
+                "across both stages; the full-step budget is inactive for step "
+                "accounting in this mode."
+            )
+
     selected_budget = (
+        steps
+        if handoff_mode == HANDOFF_PROGRESSIVE
+        else
         accelerated_steps
         if acceleration == ACCELERATION_BOTH
         else full_steps
@@ -467,7 +517,8 @@ def _summary(plan: dict[str, Any]) -> str:
     if plan["warnings"]:
         warning_text = " | " + " ".join(plan["warnings"])
     return (
-        f"{plan['task']} · {plan['acceleration']} · {plan['priority']} | "
+        f"{plan['task']} · {plan['acceleration']} · {plan['priority']} · "
+        f"{plan['handoff_mode']} | "
         f"{plan['steps']} steps = {plan['steps_high']} high + "
         f"{plan['steps_low']} low | budgets A{plan['accelerated_steps']}/"
         f"F{plan['full_steps']} · range {plan['high_range_percent']:.1f}% high | "
@@ -488,6 +539,7 @@ def build_plan(
     scheduler: str,
     priority: str,
     sigma_provider: SigmaProvider,
+    handoff_mode: str = HANDOFF_DIRECT,
     forced_steps_high: int | None = None,
     forced_shift: float | None = None,
     forced_high_range_percent: float | None = None,
@@ -498,6 +550,8 @@ def build_plan(
         raise ValueError(f"Unknown Wan 2.2 acceleration mode: {acceleration}")
     if priority not in PRIORITY_OPTIONS:
         raise ValueError(f"Unknown Wan 2.2 priority: {priority}")
+    if handoff_mode not in HANDOFF_OPTIONS:
+        raise ValueError(f"Unknown Wan 2.2 handoff mode: {handoff_mode}")
 
     accelerated_steps = int(accelerated_steps)
     full_steps = int(full_steps)
@@ -571,11 +625,12 @@ def build_plan(
             priority=priority,
         )
 
-    steps_high, steps_low, high_budget, low_budget = project_stage_steps(
+    steps_high, steps_low, high_budget, low_budget = project_handoff_steps(
         accelerated_steps=accelerated_steps,
         full_steps=full_steps,
         acceleration=acceleration,
         high_range_share=high_range_share,
+        handoff_mode=handoff_mode,
     )
     projected_steps_high = steps_high
     projected_steps_low = steps_low
@@ -620,6 +675,18 @@ def build_plan(
     )
     sigmas_high = sigmas[: steps_high + 1]
     sigmas_low = sigmas[steps_high:]
+    sigmas_high_terminal = _sequence_like(
+        sigmas_high,
+        [*sigma_values[:steps_high], 0.0],
+    )
+    if handoff_mode == HANDOFF_PROGRESSIVE:
+        sigmas_high_sampling = sigmas_high_terminal
+        high_output_mode = "terminal"
+        low_noise_mode = "random"
+    else:
+        sigmas_high_sampling = sigmas_high
+        high_output_mode = "leftover"
+        low_noise_mode = "disable"
     boundary_sigma_before = sigma_values[steps_high - 1]
     boundary_sigma_after = sigma_values[steps_high]
     boundary_distance = min(
@@ -637,6 +704,7 @@ def build_plan(
 
     warnings = _warnings_for_plan(
         acceleration=acceleration,
+        handoff_mode=handoff_mode,
         steps=steps,
         steps_high=steps_high,
         steps_low=steps_low,
@@ -656,6 +724,7 @@ def build_plan(
         "full_steps": full_steps,
         "scheduler": scheduler,
         "priority": priority,
+        "handoff_mode": handoff_mode,
         "sigma_provider": sigma_provider,
     }
     plan: dict[str, Any] = {
@@ -666,6 +735,7 @@ def build_plan(
         "overrides": overrides,
         "task": task,
         "acceleration": acceleration,
+        "handoff_mode": handoff_mode,
         "accelerate_high": acceleration
         in (ACCELERATION_HIGH, ACCELERATION_BOTH),
         "accelerate_low": acceleration
@@ -703,6 +773,12 @@ def build_plan(
         "sigmas": sigmas,
         "sigmas_high": sigmas_high,
         "sigmas_low": sigmas_low,
+        "sigmas_high_terminal": sigmas_high_terminal,
+        "sigmas_high_sampling": sigmas_high_sampling,
+        "high_output_mode": high_output_mode,
+        "noise_high_mode": "random",
+        "low_noise_mode": low_noise_mode,
+        "noise_low_mode": low_noise_mode,
         "split_sigma": boundary_sigma_after,
         "boundary_sigma_before": boundary_sigma_before,
         "boundary_sigma_after": boundary_sigma_after,
@@ -743,6 +819,7 @@ def validate_plan(plan: Any) -> dict[str, Any]:
     required = {
         "source_controls",
         "overrides",
+        "handoff_mode",
         "curve_profile",
         "curve_mode",
         "shift_anchor",
@@ -754,6 +831,11 @@ def validate_plan(plan: Any) -> dict[str, Any]:
         "sigmas",
         "sigmas_high",
         "sigmas_low",
+        "sigmas_high_terminal",
+        "sigmas_high_sampling",
+        "high_output_mode",
+        "noise_high_mode",
+        "noise_low_mode",
         "boundary",
     }
     missing = sorted(required.difference(plan))
@@ -765,6 +847,8 @@ def validate_plan(plan: Any) -> dict[str, Any]:
         raise ValueError("Sampling Plan overrides must be a dictionary.")
     if plan["curve_mode"] not in {"exact", "piecewise"}:
         raise ValueError(f"Unknown Sampling Plan curve mode: {plan['curve_mode']}.")
+    if plan["handoff_mode"] not in HANDOFF_OPTIONS:
+        raise ValueError(f"Unknown Sampling Plan handoff mode: {plan['handoff_mode']}.")
 
     steps = int(plan["steps"])
     steps_high = int(plan["steps_high"])
@@ -781,6 +865,15 @@ def validate_plan(plan: Any) -> dict[str, Any]:
         context="Sampling Plan high sigma curve",
         require_terminal_zero=False,
     )
+    _, high_terminal_values = _validated_sigmas(
+        plan["sigmas_high_terminal"],
+        context="Sampling Plan terminal high sigma curve",
+    )
+    _, high_sampling_values = _validated_sigmas(
+        plan["sigmas_high_sampling"],
+        context="Sampling Plan sampling high sigma curve",
+        require_terminal_zero=plan["handoff_mode"] == HANDOFF_PROGRESSIVE,
+    )
     _, low_values = _validated_sigmas(
         plan["sigmas_low"],
         context="Sampling Plan low sigma curve",
@@ -789,6 +882,14 @@ def validate_plan(plan: Any) -> dict[str, Any]:
         raise ValueError("Sampling Plan step count disagrees with its sigma curve.")
     if len(high_values) != steps_high + 1:
         raise ValueError("Sampling Plan high-step count disagrees with its sigma curve.")
+    if len(high_terminal_values) != steps_high + 1:
+        raise ValueError(
+            "Sampling Plan terminal high-step count disagrees with its sigma curve."
+        )
+    if len(high_sampling_values) != steps_high + 1:
+        raise ValueError(
+            "Sampling Plan sampling high-step count disagrees with its sigma curve."
+        )
     if len(low_values) != steps_low + 1:
         raise ValueError("Sampling Plan low-step count disagrees with its sigma curve.")
     if not _sequences_close(plan["sigmas_high"], plan["sigmas"][: steps_high + 1]):
@@ -802,6 +903,27 @@ def validate_plan(plan: Any) -> dict[str, Any]:
         abs_tol=SIGMA_TOLERANCE,
     ):
         raise ValueError("Sampling Plan stages must share exactly one handoff sigma.")
+    if plan["handoff_mode"] == HANDOFF_PROGRESSIVE:
+        if not _sequences_close(
+            plan["sigmas_high_sampling"],
+            plan["sigmas_high_terminal"],
+        ):
+            raise ValueError(
+                "Progressive Transcode must use the terminal high sigma curve."
+            )
+        if plan["noise_low_mode"] != "random" or plan["high_output_mode"] != "terminal":
+            raise ValueError(
+                "Progressive Transcode requires terminal high output and low re-noise."
+            )
+    else:
+        if not _sequences_close(plan["sigmas_high_sampling"], plan["sigmas_high"]):
+            raise ValueError(
+                "Direct Latent must use the handoff high sigma curve."
+            )
+        if plan["noise_low_mode"] != "disable" or plan["high_output_mode"] != "leftover":
+            raise ValueError(
+                "Direct Latent requires leftover high output and disabled low noise."
+            )
 
     boundary = float(plan["boundary"])
     before = values[steps_high - 1]

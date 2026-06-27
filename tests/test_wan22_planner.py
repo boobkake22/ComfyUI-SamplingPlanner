@@ -9,6 +9,8 @@ from wan22_planner import (
     CURVE_PROFILE_COMFYUI,
     CURVE_PROFILE_DISTILLED,
     CURVE_PROFILE_NATIVE,
+    HANDOFF_DIRECT,
+    HANDOFF_PROGRESSIVE,
     PLAN_VERSION,
     PRIORITY_BALANCED,
     PRIORITY_DETAIL,
@@ -47,6 +49,7 @@ def build(**updates):
         "full_steps": 30,
         "scheduler": "simple",
         "priority": PRIORITY_BALANCED,
+        "handoff_mode": HANDOFF_DIRECT,
         "sigma_provider": shifted_linear_provider,
     }
     arguments.update(updates)
@@ -93,6 +96,32 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertEqual(list(plan["sigmas_low"]), sigmas[split:])
         self.assertEqual(plan["sigmas_high"][-1], plan["sigmas_low"][0])
         self.assertNotEqual(plan["sigmas_high"][-1], 0.0)
+        self.assertEqual(list(plan["sigmas_high_sampling"]), list(plan["sigmas_high"]))
+        self.assertEqual(plan["noise_low_mode"], "disable")
+
+    def test_progressive_low_only_uses_strategy_budget_and_terminal_high(self):
+        plan = build(
+            acceleration=ACCELERATION_LOW,
+            priority=PRIORITY_EVEN,
+            handoff_mode=HANDOFF_PROGRESSIVE,
+        )
+        self.assertEqual((plan["high_budget"], plan["low_budget"]), (10, 10))
+        self.assertEqual((plan["steps_high"], plan["steps_low"]), (5, 5))
+        self.assertEqual(plan["steps"], 10)
+        self.assertEqual(plan["handoff_mode"], HANDOFF_PROGRESSIVE)
+        self.assertEqual(plan["high_output_mode"], "terminal")
+        self.assertEqual(plan["noise_high_mode"], "random")
+        self.assertEqual(plan["noise_low_mode"], "random")
+        self.assertEqual(plan["sigmas_high"][-1], plan["sigmas_low"][0])
+        self.assertNotEqual(plan["sigmas_high"][-1], 0.0)
+        self.assertEqual(plan["sigmas_high_terminal"][-1], 0.0)
+        self.assertEqual(
+            list(plan["sigmas_high_sampling"]),
+            list(plan["sigmas_high_terminal"]),
+        )
+        self.assertTrue(
+            any("full-step budget is inactive" in item for item in plan["warnings"])
+        )
 
     def test_unaccelerated_uses_task_native_shift(self):
         t2v = build(

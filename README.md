@@ -56,6 +56,22 @@ Outputs a priority combo compatible with Sampling Plan (Wan 2.2):
 - `Motion / Structure`
 - `Detail / Refinement`
 
+### Handoff Selector
+
+Outputs a handoff-mode combo compatible with Sampling Plan (Wan 2.2):
+
+- `Direct Latent`
+- `Progressive Transcode`
+
+`Direct Latent` is the normal two-stage continuation: the high sampler stops at
+the handoff sigma, the low sampler starts from that latent, and low-stage noise
+is disabled.
+
+`Progressive Transcode` is for workflows that decode/upscale/re-encode between
+the high and low stages. The high sampler receives a terminal high schedule for a
+clean decoded image, and the low sampler re-noises the re-encoded latent at the
+handoff sigma.
+
 ### Step Budget
 
 Defines two full-range-equivalent budgets:
@@ -134,6 +150,7 @@ Managed controls:
 - **Step Budget:** accelerated and full-range-equivalent steps
 - **Scheduler:** ComfyUI sigma scheduler
 - **Priority:** Balanced, 50/50, Motion / Structure, or Detail / Refinement
+- **Handoff Mode:** Direct Latent or Progressive Transcode
 
 The connected `MODEL` is used to calculate the real ComfyUI sigma schedule. It
 can be either Wan expert model.
@@ -146,9 +163,11 @@ The planner uses the official Wan 2.2 boundaries:
 - T2V: `0.875`
 - I2V: `0.900`
 
-Priority determines the high/low share of the denoising range. Acceleration
-determines which budget is projected onto each share. The resulting high and low
-step counts are added to produce the effective total schedule.
+Priority determines the high/low share of the denoising range. Acceleration and
+Handoff Mode determine which budget is projected onto each share. Direct Latent
+projects active accelerated/full budgets independently. Progressive Transcode
+uses one strategy budget across both stages: the full budget when acceleration is
+off, or the accelerated budget when any acceleration is active.
 
 `Auto` selects an evidence-backed curve profile:
 
@@ -210,6 +229,39 @@ Sampling Plan ────────────┘
 Model Pair Breakout has no user-facing widgets. Shift is owned by the plan,
 including any Shift Override.
 
+### Custom Sampler Breakout
+
+Connect the plan and a seed. The node outputs:
+
+- high noise
+- low noise
+- high sigmas
+- low sigmas
+- total/high/low step counts
+- shift
+- the plan passthrough
+
+Use this with `SamplerCustomAdvanced` and `CFGGuider`.
+
+In `Direct Latent`, high noise is random, low noise is disabled, and the high
+sigmas end at the same handoff sigma where the low sigmas begin.
+
+In `Progressive Transcode`, high noise is random, low noise is random, and the
+high sigmas terminate at zero for a clean high-stage decode. The low sigmas still
+begin at the original handoff sigma, so the re-encoded latent is re-noised at the
+same point where low-noise refinement begins.
+
+Recommended progressive wiring:
+
+```text
+Custom Sampler Breakout noise_high  → high SamplerCustomAdvanced noise
+Custom Sampler Breakout sigmas_high → high SamplerCustomAdvanced sigmas
+high SamplerCustomAdvanced output   → decode/upscale/re-encode
+Custom Sampler Breakout noise_low   → low SamplerCustomAdvanced noise
+Custom Sampler Breakout sigmas_low  → low SamplerCustomAdvanced sigmas
+re-encoded latent                   → low SamplerCustomAdvanced latent_image
+```
+
 ### KSampler Breakout
 
 Connect the plan, high/low expert models, and the sampler selected for the
@@ -241,6 +293,11 @@ using piecewise-resampled sigmas are not KSampler-representable; the node report
 that incompatibility and directs the workflow to Sigma Breakout instead of
 silently approximating the curve.
 
+Progressive Transcode plans also bypass KSampler Breakout because that node does
+not emit the required add-noise and terminal-output controls. Use Custom Sampler
+Breakout with SamplerCustomAdvanced, or wire KSampler Advanced's add-noise and
+return-with-leftover-noise widgets manually.
+
 For parity testing against older Wan 2.2 workflows, prefer this KSampler
 Breakout path whenever the plan reports `curve_mode: exact`. It lets ComfyUI's
 native KSampler Advanced implementation own `start_at_step`, `end_at_step`, and
@@ -257,7 +314,10 @@ Exposes:
 - total/high/low step counts
 - shift
 
-The high schedule ends at the same sigma where the low schedule begins.
+In Direct Latent, the high schedule ends at the same sigma where the low schedule
+begins. In Progressive Transcode, Sigma Breakout emits the terminal high schedule
+for a clean decode/upscale/re-encode handoff, while the low schedule still begins
+at the original handoff sigma.
 
 Sigma Breakout is the authoritative sigma-output path for every plan. It
 preserves the exact validated curve, including mixed-budget and
@@ -265,7 +325,7 @@ priority-adjusted piecewise curves that ordinary KSampler controls cannot
 express. Use it when KSampler Breakout reports that the plan cannot be
 represented by native KSampler Advanced controls.
 
-For `SamplerCustomAdvanced`, continue the two expert stages as follows:
+For direct `SamplerCustomAdvanced`, continue the two expert stages as follows:
 
 ```text
 RandomNoise → high SamplerCustomAdvanced → output → low SamplerCustomAdvanced → output
@@ -281,7 +341,9 @@ For KSampler parity, use `CFGGuider` for each custom-sampler stage, feed the
 same positive/negative conditioning and CFG values that the KSampler Advanced
 nodes used, use the same `KSamplerSelect` sampler, and do not insert a separate
 `BasicScheduler`/scheduler node between the plan and the samplers. Sigma
-Breakout already emits the high and low sigma slices.
+Breakout already emits the mode-correct high and low sigma slices. Custom
+Sampler Breakout adds the matching noise objects so the workflow needs less
+manual switching.
 
 See [Comfy sampler parity notes](docs/comfy-sampler-parity.md) for the source
 comparison between KSampler Advanced and SamplerCustomAdvanced.

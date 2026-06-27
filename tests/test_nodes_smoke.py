@@ -30,6 +30,15 @@ class FakeModelSamplingSD3:
         return (patched,)
 
 
+class FakeNoiseRandomNoise:
+    def __init__(self, seed):
+        self.seed = int(seed)
+
+
+class FakeNoiseEmptyNoise:
+    pass
+
+
 def fake_calculate_sigmas(model_sampling, scheduler, steps):
     del scheduler
     shift = model_sampling.shift
@@ -76,11 +85,15 @@ def load_nodes_module():
     comfy_extras.__path__ = []
     model_advanced = types.ModuleType("comfy_extras.nodes_model_advanced")
     model_advanced.ModelSamplingSD3 = FakeModelSamplingSD3
+    nodes_custom_sampler = types.ModuleType("comfy_extras.nodes_custom_sampler")
+    nodes_custom_sampler.Noise_RandomNoise = FakeNoiseRandomNoise
+    nodes_custom_sampler.Noise_EmptyNoise = FakeNoiseEmptyNoise
 
     sys.modules["comfy"] = comfy
     sys.modules["comfy.samplers"] = comfy_samplers
     sys.modules["comfy_extras"] = comfy_extras
     sys.modules["comfy_extras.nodes_model_advanced"] = model_advanced
+    sys.modules["comfy_extras.nodes_custom_sampler"] = nodes_custom_sampler
 
     spec = importlib.util.spec_from_file_location(
         PACKAGE_NAME,
@@ -107,6 +120,7 @@ class NodeSmokeTests(unittest.TestCase):
                 "SamplerSelector",
                 "TaskSelector",
                 "PrioritySelector",
+                "HandoffSelector",
                 "StepBudget",
                 "AccelerationSelector",
                 "AccelerationModelPair",
@@ -115,6 +129,7 @@ class NodeSmokeTests(unittest.TestCase):
                 "RangeSplitOverrideLegacy",
                 "ShiftOverride",
                 "ModelPairBreakout",
+                "CustomSamplerBreakout",
                 "KSamplerBreakout",
                 "SigmaBreakout",
             },
@@ -175,6 +190,19 @@ class NodeSmokeTests(unittest.TestCase):
         self.assertEqual(
             selector().select_priority("50/50 Split"),
             ("50/50 Split",),
+        )
+
+    def test_handoff_selector_matches_plan_combo(self):
+        selector = self.nodes.HandoffSelector
+        selector_options = selector.INPUT_TYPES()["required"]["handoff_mode"][0]
+        plan_options = self.nodes.SamplingPlanWan22.INPUT_TYPES()["required"][
+            "handoff_mode"
+        ][0]
+        self.assertIs(selector_options, plan_options)
+        self.assertEqual(selector.RETURN_TYPES, (plan_options,))
+        self.assertEqual(
+            selector().select_handoff("Progressive Transcode"),
+            ("Progressive Transcode",),
         )
 
     def test_acceleration_selector_matches_plan_combo(self):
@@ -377,6 +405,16 @@ class NodeSmokeTests(unittest.TestCase):
             revised["steps_low"] + 1,
         )
 
+        custom_result = self.nodes.CustomSamplerBreakout().breakout(
+            revised,
+            1234,
+        )["result"]
+        self.assertEqual(len(custom_result), 9)
+        self.assertIsInstance(custom_result[0], FakeNoiseRandomNoise)
+        self.assertIsInstance(custom_result[1], FakeNoiseEmptyNoise)
+        self.assertEqual(custom_result[0].seed, 1234)
+        self.assertEqual(list(custom_result[2]), list(revised["sigmas_high"]))
+
         model_pair_result = self.nodes.ModelPairBreakout().breakout(
             revised,
             FakeModel(),
@@ -419,6 +457,37 @@ class NodeSmokeTests(unittest.TestCase):
                 FakeModel(),
                 FakeModel(),
                 "custom_sampler",
+            )
+
+    def test_progressive_custom_sampler_breakout_uses_terminal_high_and_renoise(self):
+        plan_node = self.nodes.SamplingPlanWan22()
+        budget = self.nodes.StepBudget().create_budget(10, 30)[0]
+        plan = plan_node.create_plan(
+            FakeModel(),
+            "I2V",
+            "Low only",
+            budget,
+            "simple",
+            "50/50 Split",
+            "Progressive Transcode",
+        )["result"][0]
+        self.assertEqual((plan["steps_high"], plan["steps_low"]), (5, 5))
+
+        result = self.nodes.CustomSamplerBreakout().breakout(plan, 9876)["result"]
+        self.assertIsInstance(result[0], FakeNoiseRandomNoise)
+        self.assertIsInstance(result[1], FakeNoiseRandomNoise)
+        self.assertEqual(result[0].seed, 9876)
+        self.assertEqual(result[1].seed, 9876)
+        self.assertEqual(result[2][-1], 0.0)
+        self.assertEqual(list(result[2]), list(plan["sigmas_high_terminal"]))
+        self.assertEqual(list(result[3]), list(plan["sigmas_low"]))
+
+        with self.assertRaisesRegex(ValueError, "Progressive Transcode"):
+            self.nodes.KSamplerBreakout().breakout(
+                plan,
+                FakeModel(),
+                FakeModel(),
+                "euler",
             )
 
     def test_override_nodes_expose_compact_exact_controls(self):
