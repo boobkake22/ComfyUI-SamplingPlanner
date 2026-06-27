@@ -1,0 +1,12 @@
+[project]
+name = "ComfyUI-SamplingPlanner"
+description = "Task-aware Wan 2.2 sampling plans and sampler-specific breakout nodes for ComfyUI."
+version = "0.2.1"
+requires-python = ">=3.10"
+
+[project.urls]
+Repository = "https://github.com/claytongrey/ComfyUI-SamplingPlanner"
+
+[tool.comfy]
+PublisherId = "claytongrey"
+DisplayName = "Sampling Planner"
