@@ -437,7 +437,7 @@ def _warnings_for_plan(
 
     if sigma_budget_mode == SIGMA_BUDGET_ACCELERATED_50_50:
         warnings.append(
-            "Accelerated 50/50 Sigma Override is active: model and CFG routing "
+            "Progressive 50/50 Sigma Control is active: model and CFG routing "
             "remain Low only, but the sigma curve uses the accelerated budget "
             "split 50/50."
         )
@@ -528,7 +528,7 @@ def build_plan(
         and acceleration != ACCELERATION_LOW
     ):
         raise ValueError(
-            "Accelerated 50/50 Sigma Override only applies when acceleration "
+            "Progressive 50/50 Sigma Control only applies when acceleration "
             "is Low only. It preserves base high / accelerated low model routing."
         )
 

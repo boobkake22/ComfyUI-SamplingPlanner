@@ -112,7 +112,7 @@ class NodeSmokeTests(unittest.TestCase):
                 "AccelerationModelPair",
                 "SamplingPlanWan22",
                 "StepSplitOverride",
-                "AcceleratedSigmaOverride",
+                "ProgressiveSigmaControl",
                 "RangeSplitOverrideLegacy",
                 "ShiftOverride",
                 "ModelPairBreakout",
@@ -383,7 +383,7 @@ class NodeSmokeTests(unittest.TestCase):
             "50/50 Split",
         )["result"][0]
         sigma_override = (
-            self.nodes.AcceleratedSigmaOverride()
+            self.nodes.ProgressiveSigmaControl()
             .create_override()["result"][0]
         )
         accelerated_sigmas = plan_node.create_plan(
@@ -486,11 +486,11 @@ class NodeSmokeTests(unittest.TestCase):
             self.nodes.SamplingPlanWan22.INPUT_TYPES()["optional"],
         )
         self.assertEqual(
-            set(self.nodes.AcceleratedSigmaOverride.INPUT_TYPES()["required"]),
+            set(self.nodes.ProgressiveSigmaControl.INPUT_TYPES()["required"]),
             set(),
         )
         self.assertEqual(
-            self.nodes.AcceleratedSigmaOverride.RETURN_NAMES,
+            self.nodes.ProgressiveSigmaControl.RETURN_NAMES,
             ("sigma_override",),
         )
         self.assertEqual(

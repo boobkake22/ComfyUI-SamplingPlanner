@@ -697,10 +697,11 @@ class StepSplitOverride:
         return _ui_result(revised, revised)
 
 
-class AcceleratedSigmaOverride:
+class ProgressiveSigmaControl:
     DESCRIPTION = (
-        "Side-channel control for progressive upscale workflows: when connected "
-        "to Sampling Plan (Wan 2.2), Low-only acceleration uses the accelerated "
+        "Side-channel control for progressive transcode workflows: when the "
+        "low-res to high-res branch is active and this node is connected to "
+        "Sampling Plan (Wan 2.2), Low-only acceleration uses the accelerated "
         "step budget split 50/50 for the sigma curve while preserving Low-only "
         "model and CFG routing. Because it is not in the required plan chain, "
         "it can be muted with its group."
@@ -720,7 +721,7 @@ class AcceleratedSigmaOverride:
             "type": SIGMA_BUDGET_OVERRIDE_TYPE,
             "mode": SIGMA_BUDGET_ACCELERATED_50_50,
         }
-        return {"ui": {"text": ["accelerated 50/50 sigmas"]}, "result": (override,)}
+        return {"ui": {"text": ["progressive 50/50 sigmas"]}, "result": (override,)}
 
 
 class RangeSplitOverrideLegacy:
@@ -979,7 +980,7 @@ NODE_CLASS_MAPPINGS = {
     "AccelerationModelPair": AccelerationModelPair,
     "SamplingPlanWan22": SamplingPlanWan22,
     "StepSplitOverride": StepSplitOverride,
-    "AcceleratedSigmaOverride": AcceleratedSigmaOverride,
+    "ProgressiveSigmaControl": ProgressiveSigmaControl,
     "RangeSplitOverrideLegacy": RangeSplitOverrideLegacy,
     "ShiftOverride": ShiftOverride,
     "ModelPairBreakout": ModelPairBreakout,
@@ -997,7 +998,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AccelerationModelPair": "Acceleration Model Pair",
     "SamplingPlanWan22": "Sampling Plan (Wan 2.2)",
     "StepSplitOverride": "Step Split Override",
-    "AcceleratedSigmaOverride": "Accelerated 50/50 Sigma Override",
+    "ProgressiveSigmaControl": "Progressive 50/50 Sigma Control",
     "RangeSplitOverrideLegacy": "Range Split Override (Legacy)",
     "ShiftOverride": "Shift Override",
     "ModelPairBreakout": "Model Pair Breakout",

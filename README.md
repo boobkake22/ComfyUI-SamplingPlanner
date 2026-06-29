@@ -186,13 +186,17 @@ Set `steps_high` to a positive value to replace Priority's calculated high-stage
 transition count while preserving the plan's effective total. The complete curve
 and both sigma slices are rebuilt and validated.
 
-### Accelerated 50/50 Sigma Override
+### Progressive 50/50 Sigma Control
 
-No widgets. This is a narrow escape hatch for progressive upscale workflows.
-It outputs a side-channel control that connects to Sampling Plan's optional
-`sigma_override` input; it is not a pass-through node in the required plan
-chain. That means it can live inside a group that gets muted without severing
-the `WAN22_SAMPLING_PLAN` wire.
+No widgets. This is a branch-state signal for progressive transcode/upscale
+workflows. Put it inside the low-res → high-res group. When that group is
+active, the node tells Sampling Plan to use accelerated 50/50 sigmas; when the
+group is muted, the optional signal disappears and Sampling Plan falls back to
+normal Low-only accounting.
+
+It connects to Sampling Plan's optional `sigma_override` input; it is not a
+pass-through node in the required plan chain. That means the progressive group
+can be muted without severing the `WAN22_SAMPLING_PLAN` wire.
 
 Use it with Sampling Plan when:
 
@@ -205,10 +209,10 @@ Example with accelerated/full budgets `A10/F30`:
 | Plan | High steps | Low steps | Model routing |
 |---|---:|---:|---|
 | Low only + 50/50 priority | 15 | 5 | base high → accelerated low |
-| + Accelerated 50/50 Sigma Override | 5 | 5 | base high → accelerated low |
+| + Progressive 50/50 Sigma Control | 5 | 5 | base high → accelerated low |
 
-Sampling Plan intentionally rejects this override for other acceleration modes.
-The override does not manage decode/upscale/re-encode routing or noise routing;
+Sampling Plan intentionally rejects this control for other acceleration modes.
+The control does not manage decode/upscale/re-encode routing or noise routing;
 keep those visible in the workflow where the progressive technique actually
 lives.
 
@@ -223,14 +227,14 @@ curve cannot diverge.
 
 Step Split Override and Shift Override are order-independent. Each stores its
 requested override in the plan and rebuilds from the original planner controls.
-Accelerated 50/50 Sigma Override is different: it should feed Sampling Plan's
+Progressive 50/50 Sigma Control is different: it should feed Sampling Plan's
 optional `sigma_override` input, before any downstream Step Split or Shift
 overrides.
 
 For progressive-upscale style workflows, a clear ordering is:
 
 ```text
-Accelerated 50/50 Sigma Override ─┐
+Progressive 50/50 Sigma Control ─┐
                                   ├→ Sampling Plan → Step Split Override → Sigma Breakout
 normal planner controls ──────────┘
 ```
