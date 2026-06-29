@@ -112,6 +112,7 @@ class NodeSmokeTests(unittest.TestCase):
                 "AccelerationModelPair",
                 "SamplingPlanWan22",
                 "StepSplitOverride",
+                "AcceleratedSigmaOverride",
                 "RangeSplitOverrideLegacy",
                 "ShiftOverride",
                 "ModelPairBreakout",
@@ -369,6 +370,29 @@ class NodeSmokeTests(unittest.TestCase):
             list(split_then_shift["sigmas"]),
         )
 
+        low_only_plan = plan_node.create_plan(
+            FakeModel(),
+            "I2V",
+            "Low only",
+            budget,
+            "simple",
+            "50/50 Split",
+        )["result"][0]
+        accelerated_sigmas = (
+            self.nodes.AcceleratedSigmaOverride()
+            .override_sigmas(low_only_plan)["result"][0]
+        )
+        self.assertEqual(
+            (low_only_plan["steps_high"], low_only_plan["steps_low"]),
+            (15, 5),
+        )
+        self.assertEqual(
+            (accelerated_sigmas["steps_high"], accelerated_sigmas["steps_low"]),
+            (5, 5),
+        )
+        self.assertFalse(accelerated_sigmas["accelerate_high"])
+        self.assertTrue(accelerated_sigmas["accelerate_low"])
+
         sigma_result = self.nodes.SigmaBreakout().breakout(revised)["result"]
         self.assertEqual(len(sigma_result), 8)
         self.assertEqual(len(sigma_result[0]), 7)
@@ -426,6 +450,10 @@ class NodeSmokeTests(unittest.TestCase):
         shift = self.nodes.ShiftOverride.INPUT_TYPES()["required"]
         self.assertEqual(split["steps_high"][0], "INT")
         self.assertEqual(shift["shift"][0], "FLOAT")
+        self.assertEqual(
+            set(self.nodes.AcceleratedSigmaOverride.INPUT_TYPES()["required"]),
+            {"plan"},
+        )
         self.assertEqual(
             self.nodes.ModelPairBreakout.RETURN_NAMES,
             ("model_high", "model_low", "plan"),

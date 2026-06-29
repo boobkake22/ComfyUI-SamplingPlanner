@@ -47,6 +47,9 @@ CURVE_PROFILE_NATIVE = "wan_native"
 CURVE_PROFILE_DISTILLED = "lightx2v_distilled"
 CURVE_PROFILE_COMFYUI = "comfyui_yaw"
 
+SIGMA_BUDGET_PROJECTED = "projected"
+SIGMA_BUDGET_ACCELERATED_50_50 = "accelerated_50_50"
+
 DENSE_REFERENCE_STEPS = 256
 MAX_REFERENCE_STEPS = 4096
 MIN_SHIFT = 0.01
@@ -394,6 +397,7 @@ def optimize_shift(
 def _warnings_for_plan(
     *,
     acceleration: str,
+    sigma_budget_mode: str,
     steps: int,
     steps_high: int,
     steps_low: int,
@@ -431,7 +435,17 @@ def _warnings_for_plan(
     elif not accelerate_low and steps_low < 3:
         warnings.append("The unaccelerated low-noise stage has very few steps.")
 
+    if sigma_budget_mode == SIGMA_BUDGET_ACCELERATED_50_50:
+        warnings.append(
+            "Accelerated 50/50 Sigma Override is active: model and CFG routing "
+            "remain Low only, but the sigma curve uses the accelerated budget "
+            "split 50/50."
+        )
+
     selected_budget = (
+        accelerated_steps
+        if sigma_budget_mode == SIGMA_BUDGET_ACCELERATED_50_50
+        else
         accelerated_steps
         if acceleration == ACCELERATION_BOTH
         else full_steps
@@ -466,11 +480,15 @@ def _summary(plan: dict[str, Any]) -> str:
     warning_text = ""
     if plan["warnings"]:
         warning_text = " | " + " ".join(plan["warnings"])
+    budget_mode_text = ""
+    if plan.get("sigma_budget_mode") == SIGMA_BUDGET_ACCELERATED_50_50:
+        budget_mode_text = " · accelerated 50/50 sigmas"
     return (
         f"{plan['task']} · {plan['acceleration']} · {plan['priority']} | "
         f"{plan['steps']} steps = {plan['steps_high']} high + "
         f"{plan['steps_low']} low | budgets A{plan['accelerated_steps']}/"
-        f"F{plan['full_steps']} · range {plan['high_range_percent']:.1f}% high | "
+        f"F{plan['full_steps']}{budget_mode_text} · "
+        f"range {plan['high_range_percent']:.1f}% high | "
         f"{plan['curve_profile']} / {plan['curve_mode']} · "
         f"shift {plan['shift']:.4f} ({plan['shift_source']}) | "
         f"boundary σ={plan['boundary']:.3f}, handoff σ={plan['split_sigma']:.4f}"
@@ -491,6 +509,7 @@ def build_plan(
     forced_steps_high: int | None = None,
     forced_shift: float | None = None,
     forced_high_range_percent: float | None = None,
+    forced_sigma_budget_mode: str | None = None,
 ) -> dict[str, Any]:
     if task not in TASK_PROFILES:
         raise ValueError(f"Unknown Wan 2.2 task: {task}")
@@ -498,6 +517,20 @@ def build_plan(
         raise ValueError(f"Unknown Wan 2.2 acceleration mode: {acceleration}")
     if priority not in PRIORITY_OPTIONS:
         raise ValueError(f"Unknown Wan 2.2 priority: {priority}")
+    if forced_sigma_budget_mode is not None and (
+        forced_sigma_budget_mode != SIGMA_BUDGET_ACCELERATED_50_50
+    ):
+        raise ValueError(
+            f"Unknown Wan 2.2 sigma budget override: {forced_sigma_budget_mode}"
+        )
+    if (
+        forced_sigma_budget_mode == SIGMA_BUDGET_ACCELERATED_50_50
+        and acceleration != ACCELERATION_LOW
+    ):
+        raise ValueError(
+            "Accelerated 50/50 Sigma Override only applies when acceleration "
+            "is Low only. It preserves base high / accelerated low model routing."
+        )
 
     accelerated_steps = int(accelerated_steps)
     full_steps = int(full_steps)
@@ -556,6 +589,10 @@ def build_plan(
 
     legacy_override_ignored = (
         forced_steps_high is not None and forced_high_range_percent is not None
+    ) or (
+        forced_sigma_budget_mode == SIGMA_BUDGET_ACCELERATED_50_50
+        and forced_high_range_percent is not None
+        and forced_steps_high is None
     )
     if forced_high_range_percent is not None and forced_steps_high is None:
         forced_high_range_percent = float(forced_high_range_percent)
@@ -579,6 +616,15 @@ def build_plan(
     )
     projected_steps_high = steps_high
     projected_steps_low = steps_low
+    sigma_budget_mode = SIGMA_BUDGET_PROJECTED
+
+    if forced_sigma_budget_mode == SIGMA_BUDGET_ACCELERATED_50_50:
+        sigma_budget_mode = SIGMA_BUDGET_ACCELERATED_50_50
+        high_range_share = 0.5
+        high_budget = accelerated_steps
+        low_budget = accelerated_steps
+        steps_high = _rounded_stage_share(accelerated_steps, high_range_share)
+        steps_low = accelerated_steps - steps_high
 
     if forced_steps_high is not None:
         forced_steps_high = int(forced_steps_high)
@@ -632,11 +678,14 @@ def build_plan(
         overrides["steps_high"] = forced_steps_high
     if forced_shift is not None:
         overrides["shift"] = float(forced_shift)
+    if forced_sigma_budget_mode == SIGMA_BUDGET_ACCELERATED_50_50:
+        overrides["sigma_budget_mode"] = SIGMA_BUDGET_ACCELERATED_50_50
     if forced_high_range_percent is not None and forced_steps_high is None:
         overrides["high_range_percent"] = float(forced_high_range_percent)
 
     warnings = _warnings_for_plan(
         acceleration=acceleration,
+        sigma_budget_mode=sigma_budget_mode,
         steps=steps,
         steps_high=steps_high,
         steps_low=steps_low,
@@ -674,6 +723,7 @@ def build_plan(
         "full_steps": full_steps,
         "high_budget": high_budget,
         "low_budget": low_budget,
+        "sigma_budget_mode": sigma_budget_mode,
         "high_range_share": high_range_share,
         "high_range_percent": high_range_share * 100.0,
         "profile_high_range_share": profile_share,
@@ -714,6 +764,7 @@ def build_plan(
         "manual_split": (
             forced_steps_high is not None
             or forced_high_range_percent is not None
+            or forced_sigma_budget_mode is not None
         ),
         "warnings": warnings,
     }

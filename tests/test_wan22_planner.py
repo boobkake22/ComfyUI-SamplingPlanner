@@ -14,6 +14,7 @@ from wan22_planner import (
     PRIORITY_DETAIL,
     PRIORITY_EVEN,
     PRIORITY_MOTION,
+    SIGMA_BUDGET_ACCELERATED_50_50,
     build_plan,
     validate_plan,
 )
@@ -256,6 +257,46 @@ class OverrideTests(unittest.TestCase):
         self.assertEqual(plan["shift_source"], "override")
         self.assertEqual(plan["overrides"], {"shift": 6.5})
         self.assertTrue(plan["boundary_straddled"])
+
+    def test_accelerated_50_50_sigma_override_preserves_low_only_routing(self):
+        normal = build(
+            acceleration=ACCELERATION_LOW,
+            priority=PRIORITY_EVEN,
+        )
+        overridden = build(
+            acceleration=ACCELERATION_LOW,
+            priority=PRIORITY_EVEN,
+            forced_sigma_budget_mode=SIGMA_BUDGET_ACCELERATED_50_50,
+        )
+        self.assertEqual((normal["steps_high"], normal["steps_low"]), (15, 5))
+        self.assertEqual((overridden["steps_high"], overridden["steps_low"]), (5, 5))
+        self.assertEqual(overridden["steps"], 10)
+        self.assertFalse(overridden["accelerate_high"])
+        self.assertTrue(overridden["accelerate_low"])
+        self.assertEqual(
+            overridden["overrides"],
+            {"sigma_budget_mode": SIGMA_BUDGET_ACCELERATED_50_50},
+        )
+        self.assertEqual(
+            overridden["sigma_budget_mode"],
+            SIGMA_BUDGET_ACCELERATED_50_50,
+        )
+        self.assertIn("accelerated 50/50 sigmas", overridden["summary"])
+
+    def test_accelerated_50_50_sigma_override_rejects_non_low_only(self):
+        for acceleration in (
+            ACCELERATION_BOTH,
+            ACCELERATION_HIGH,
+            ACCELERATION_NONE,
+        ):
+            with self.subTest(acceleration=acceleration), self.assertRaisesRegex(
+                ValueError,
+                "Low only",
+            ):
+                build(
+                    acceleration=acceleration,
+                    forced_sigma_budget_mode=SIGMA_BUDGET_ACCELERATED_50_50,
+                )
 
     def test_step_and_shift_overrides_are_order_independent(self):
         first = build(forced_steps_high=6, forced_shift=7.25)

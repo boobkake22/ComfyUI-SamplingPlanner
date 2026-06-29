@@ -182,6 +182,27 @@ This replaces Priority's calculated high-stage transition count while preserving
 the plan's effective total. The complete curve and both sigma slices are rebuilt
 and validated.
 
+### Accelerated 50/50 Sigma Override
+
+No widgets. This is a narrow escape hatch for progressive upscale workflows.
+
+Use it after Sampling Plan when:
+
+- Acceleration is `Low only`
+- you still want model/CFG routing to remain base high → accelerated low
+- but you want the sigma curve to use the accelerated budget split 50/50
+
+Example with accelerated/full budgets `A10/F30`:
+
+| Plan | High steps | Low steps | Model routing |
+|---|---:|---:|---|
+| Low only + 50/50 priority | 15 | 5 | base high → accelerated low |
+| + Accelerated 50/50 Sigma Override | 5 | 5 | base high → accelerated low |
+
+The node intentionally rejects other acceleration modes. It does not manage
+decode/upscale/re-encode routing, noise routing, or group muting; keep those
+visible in the workflow where the progressive technique actually lives.
+
 ### Shift Override
 
 Adds one managed field: `shift`.
@@ -191,8 +212,9 @@ including full sigmas and high/low sigma slices. Downstream Model Pair Breakout
 then applies the rebuilt plan's shift to both models, so model shift and sampling
 curve cannot diverge.
 
-Step Split Override and Shift Override are order-independent. Each stores its
-requested override in the plan and rebuilds from the original planner controls.
+Step Split Override, Accelerated 50/50 Sigma Override, and Shift Override are
+order-independent. Each stores its requested override in the plan and rebuilds
+from the original planner controls.
 
 ### Model Pair Breakout
 

@@ -8,6 +8,7 @@ from comfy_extras.nodes_model_advanced import ModelSamplingSD3
 from .wan22_planner import (
     ACCELERATION_BOTH,
     ACCELERATION_OPTIONS,
+    SIGMA_BUDGET_ACCELERATED_50_50,
     PLAN_TYPE,
     PRIORITY_BALANCED,
     PRIORITY_OPTIONS,
@@ -145,6 +146,7 @@ def _rebuild_plan(plan: Any, **override_updates: Any) -> dict[str, Any]:
         forced_steps_high=overrides.get("steps_high"),
         forced_shift=overrides.get("shift"),
         forced_high_range_percent=overrides.get("high_range_percent"),
+        forced_sigma_budget_mode=overrides.get("sigma_budget_mode"),
     )
 
 
@@ -656,6 +658,42 @@ class StepSplitOverride:
         return _ui_result(revised, revised)
 
 
+class AcceleratedSigmaOverride:
+    DESCRIPTION = (
+        "Special-case override for progressive upscale workflows: when "
+        "Acceleration is Low only, use the accelerated step budget split 50/50 "
+        "for the sigma curve while preserving Low-only model and CFG routing."
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "plan": (
+                    PLAN_TYPE,
+                    {
+                        "tooltip": (
+                            "A Wan 2.2 plan whose acceleration mode is Low only."
+                        )
+                    },
+                ),
+            }
+        }
+
+    RETURN_TYPES = (PLAN_TYPE,)
+    RETURN_NAMES = ("plan",)
+    FUNCTION = "override_sigmas"
+    CATEGORY = CATEGORY
+
+    def override_sigmas(self, plan):
+        revised = _rebuild_plan(
+            plan,
+            sigma_budget_mode=SIGMA_BUDGET_ACCELERATED_50_50,
+        )
+        print(f"Accelerated 50/50 Sigma Override: {revised['summary']}")
+        return _ui_result(revised, revised)
+
+
 class RangeSplitOverrideLegacy:
     DESCRIPTION = (
         "Legacy percentage-based split override. New workflows should use "
@@ -912,6 +950,7 @@ NODE_CLASS_MAPPINGS = {
     "AccelerationModelPair": AccelerationModelPair,
     "SamplingPlanWan22": SamplingPlanWan22,
     "StepSplitOverride": StepSplitOverride,
+    "AcceleratedSigmaOverride": AcceleratedSigmaOverride,
     "RangeSplitOverrideLegacy": RangeSplitOverrideLegacy,
     "ShiftOverride": ShiftOverride,
     "ModelPairBreakout": ModelPairBreakout,
@@ -929,6 +968,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AccelerationModelPair": "Acceleration Model Pair",
     "SamplingPlanWan22": "Sampling Plan (Wan 2.2)",
     "StepSplitOverride": "Step Split Override",
+    "AcceleratedSigmaOverride": "Accelerated 50/50 Sigma Override",
     "RangeSplitOverrideLegacy": "Range Split Override (Legacy)",
     "ShiftOverride": "Shift Override",
     "ModelPairBreakout": "Model Pair Breakout",
