@@ -189,8 +189,12 @@ and both sigma slices are rebuilt and validated.
 ### Accelerated 50/50 Sigma Override
 
 No widgets. This is a narrow escape hatch for progressive upscale workflows.
+It outputs a side-channel control that connects to Sampling Plan's optional
+`sigma_override` input; it is not a pass-through node in the required plan
+chain. That means it can live inside a group that gets muted without severing
+the `WAN22_SAMPLING_PLAN` wire.
 
-Use it after Sampling Plan when:
+Use it with Sampling Plan when:
 
 - Acceleration is `Low only`
 - you still want model/CFG routing to remain base high → accelerated low
@@ -203,9 +207,10 @@ Example with accelerated/full budgets `A10/F30`:
 | Low only + 50/50 priority | 15 | 5 | base high → accelerated low |
 | + Accelerated 50/50 Sigma Override | 5 | 5 | base high → accelerated low |
 
-The node intentionally rejects other acceleration modes. It does not manage
-decode/upscale/re-encode routing, noise routing, or group muting; keep those
-visible in the workflow where the progressive technique actually lives.
+Sampling Plan intentionally rejects this override for other acceleration modes.
+The override does not manage decode/upscale/re-encode routing or noise routing;
+keep those visible in the workflow where the progressive technique actually
+lives.
 
 ### Shift Override
 
@@ -216,14 +221,18 @@ including full sigmas and high/low sigma slices. Downstream Model Pair Breakout
 then applies the rebuilt plan's shift to both models, so model shift and sampling
 curve cannot diverge.
 
-Step Split Override, Accelerated 50/50 Sigma Override, and Shift Override are
-order-independent. Each stores its requested override in the plan and rebuilds
-from the original planner controls.
+Step Split Override and Shift Override are order-independent. Each stores its
+requested override in the plan and rebuilds from the original planner controls.
+Accelerated 50/50 Sigma Override is different: it should feed Sampling Plan's
+optional `sigma_override` input, before any downstream Step Split or Shift
+overrides.
 
 For progressive-upscale style workflows, a clear ordering is:
 
 ```text
-Sampling Plan → Accelerated 50/50 Sigma Override → Step Split Override → Sigma Breakout
+Accelerated 50/50 Sigma Override ─┐
+                                  ├→ Sampling Plan → Step Split Override → Sigma Breakout
+normal planner controls ──────────┘
 ```
 
 With that order, `steps_high = 0` keeps the accelerated 50/50 sigma plan, while

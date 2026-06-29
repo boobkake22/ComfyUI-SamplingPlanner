@@ -382,9 +382,27 @@ class NodeSmokeTests(unittest.TestCase):
             "simple",
             "50/50 Split",
         )["result"][0]
-        accelerated_sigmas = (
+        sigma_override = (
             self.nodes.AcceleratedSigmaOverride()
-            .override_sigmas(low_only_plan)["result"][0]
+            .create_override()["result"][0]
+        )
+        accelerated_sigmas = plan_node.create_plan(
+            FakeModel(),
+            "I2V",
+            "Low only",
+            budget,
+            "simple",
+            "50/50 Split",
+            sigma_override,
+        )["result"][0]
+        passthrough_sigmas = plan_node.create_plan(
+            FakeModel(),
+            "I2V",
+            "Low only",
+            budget,
+            "simple",
+            "50/50 Split",
+            None,
         )
         self.assertEqual(
             (low_only_plan["steps_high"], low_only_plan["steps_low"]),
@@ -396,6 +414,13 @@ class NodeSmokeTests(unittest.TestCase):
         )
         self.assertFalse(accelerated_sigmas["accelerate_high"])
         self.assertTrue(accelerated_sigmas["accelerate_low"])
+        self.assertEqual(
+            (
+                passthrough_sigmas["result"][0]["steps_high"],
+                passthrough_sigmas["result"][0]["steps_low"],
+            ),
+            (15, 5),
+        )
 
         sigma_result = self.nodes.SigmaBreakout().breakout(revised)["result"]
         self.assertEqual(len(sigma_result), 8)
@@ -456,9 +481,17 @@ class NodeSmokeTests(unittest.TestCase):
         self.assertEqual(split["steps_high"][1]["default"], 0)
         self.assertEqual(split["steps_high"][1]["min"], 0)
         self.assertEqual(shift["shift"][0], "FLOAT")
+        self.assertIn(
+            "sigma_override",
+            self.nodes.SamplingPlanWan22.INPUT_TYPES()["optional"],
+        )
         self.assertEqual(
             set(self.nodes.AcceleratedSigmaOverride.INPUT_TYPES()["required"]),
-            {"plan"},
+            set(),
+        )
+        self.assertEqual(
+            self.nodes.AcceleratedSigmaOverride.RETURN_NAMES,
+            ("sigma_override",),
         )
         self.assertEqual(
             self.nodes.ModelPairBreakout.RETURN_NAMES,

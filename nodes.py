@@ -22,6 +22,7 @@ CATEGORY = "sampling/Sampling Planner/Wan 2.2"
 HELPER_CATEGORY = "sampling/Sampling Planner/Helpers"
 ACCELERATION_STATE_TYPE = "SAMPLING_ACCELERATION_STATE"
 STEP_BUDGET_TYPE = "SAMPLING_STEP_BUDGET"
+SIGMA_BUDGET_OVERRIDE_TYPE = "SAMPLING_SIGMA_BUDGET_OVERRIDE"
 
 
 def installed_scheduler_options():
@@ -159,6 +160,24 @@ def _validate_step_budget(step_budget: Any) -> dict[str, Any]:
     return step_budget
 
 
+def _validate_sigma_budget_override(sigma_override: Any) -> str | None:
+    if sigma_override is None:
+        return None
+
+    if isinstance(sigma_override, dict):
+        if sigma_override.get("type") != SIGMA_BUDGET_OVERRIDE_TYPE:
+            raise ValueError("Expected a Sigma Budget Override.")
+        mode = sigma_override.get("mode")
+    else:
+        mode = sigma_override
+
+    if mode in (None, ""):
+        return None
+    if mode != SIGMA_BUDGET_ACCELERATED_50_50:
+        raise ValueError(f"Unknown Sigma Budget Override: {mode}")
+    return mode
+
+
 class SamplingPlanWan22:
     DESCRIPTION = (
         "Creates a task-aware Wan 2.2 sampling plan from accelerated and full "
@@ -228,7 +247,19 @@ class SamplingPlanWan22:
                         ),
                     },
                 ),
-            }
+            },
+            "optional": {
+                "sigma_override": (
+                    SIGMA_BUDGET_OVERRIDE_TYPE,
+                    {
+                        "tooltip": (
+                            "Optional side-channel override. This is intentionally "
+                            "not part of the required plan chain, so a muted group "
+                            "can disable it without severing the plan wire."
+                        )
+                    },
+                ),
+            },
         }
 
     RETURN_TYPES = (PLAN_TYPE, ACCELERATION_STATE_TYPE)
@@ -244,8 +275,10 @@ class SamplingPlanWan22:
         step_budget,
         scheduler,
         priority,
+        sigma_override=None,
     ):
         step_budget = _validate_step_budget(step_budget)
+        sigma_budget_mode = _validate_sigma_budget_override(sigma_override)
         plan = build_plan(
             model=model,
             task=task,
@@ -255,6 +288,7 @@ class SamplingPlanWan22:
             scheduler=scheduler,
             priority=priority,
             sigma_provider=_sigma_provider(model),
+            forced_sigma_budget_mode=sigma_budget_mode,
         )
         print(f"Sampling Plan (Wan 2.2): {plan['summary']}")
         return _ui_result(plan, plan, _acceleration_state(plan))
@@ -665,38 +699,28 @@ class StepSplitOverride:
 
 class AcceleratedSigmaOverride:
     DESCRIPTION = (
-        "Special-case override for progressive upscale workflows: when "
-        "Acceleration is Low only, use the accelerated step budget split 50/50 "
-        "for the sigma curve while preserving Low-only model and CFG routing."
+        "Side-channel control for progressive upscale workflows: when connected "
+        "to Sampling Plan (Wan 2.2), Low-only acceleration uses the accelerated "
+        "step budget split 50/50 for the sigma curve while preserving Low-only "
+        "model and CFG routing. Because it is not in the required plan chain, "
+        "it can be muted with its group."
     )
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "plan": (
-                    PLAN_TYPE,
-                    {
-                        "tooltip": (
-                            "A Wan 2.2 plan whose acceleration mode is Low only."
-                        )
-                    },
-                ),
-            }
-        }
+        return {"required": {}}
 
-    RETURN_TYPES = (PLAN_TYPE,)
-    RETURN_NAMES = ("plan",)
-    FUNCTION = "override_sigmas"
+    RETURN_TYPES = (SIGMA_BUDGET_OVERRIDE_TYPE,)
+    RETURN_NAMES = ("sigma_override",)
+    FUNCTION = "create_override"
     CATEGORY = CATEGORY
 
-    def override_sigmas(self, plan):
-        revised = _rebuild_plan(
-            plan,
-            sigma_budget_mode=SIGMA_BUDGET_ACCELERATED_50_50,
-        )
-        print(f"Accelerated 50/50 Sigma Override: {revised['summary']}")
-        return _ui_result(revised, revised)
+    def create_override(self):
+        override = {
+            "type": SIGMA_BUDGET_OVERRIDE_TYPE,
+            "mode": SIGMA_BUDGET_ACCELERATED_50_50,
+        }
+        return {"ui": {"text": ["accelerated 50/50 sigmas"]}, "result": (override,)}
 
 
 class RangeSplitOverrideLegacy:
