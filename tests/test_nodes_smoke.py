@@ -349,6 +349,10 @@ class NodeSmokeTests(unittest.TestCase):
         self.assertTrue(acceleration_state["accelerate_low"])
 
         override_node = self.nodes.StepSplitOverride()
+        passthrough = override_node.override_split(plan, 0)["result"][0]
+        self.assertEqual(passthrough["overrides"], {})
+        self.assertEqual(list(passthrough["sigmas"]), list(plan["sigmas"]))
+
         revised = override_node.override_split(plan, 6)["result"][0]
         self.assertEqual(revised["steps_high"], 6)
         self.assertEqual(revised["steps_low"], plan["steps"] - 6)
@@ -449,6 +453,8 @@ class NodeSmokeTests(unittest.TestCase):
         split = self.nodes.StepSplitOverride.INPUT_TYPES()["required"]
         shift = self.nodes.ShiftOverride.INPUT_TYPES()["required"]
         self.assertEqual(split["steps_high"][0], "INT")
+        self.assertEqual(split["steps_high"][1]["default"], 0)
+        self.assertEqual(split["steps_high"][1]["min"], 0)
         self.assertEqual(shift["shift"][0], "FLOAT")
         self.assertEqual(
             set(self.nodes.AcceleratedSigmaOverride.INPUT_TYPES()["required"]),

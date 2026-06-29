@@ -178,9 +178,13 @@ constructs a boundary-safe piecewise curve.
 
 Adds one managed field: `steps_high`.
 
-This replaces Priority's calculated high-stage transition count while preserving
-the plan's effective total. The complete curve and both sigma slices are rebuilt
-and validated.
+Set `steps_high` to `0` to pass the plan through unchanged. This is the
+recommended way to leave the node visibly in-chain without applying a manual
+split.
+
+Set `steps_high` to a positive value to replace Priority's calculated high-stage
+transition count while preserving the plan's effective total. The complete curve
+and both sigma slices are rebuilt and validated.
 
 ### Accelerated 50/50 Sigma Override
 
@@ -215,6 +219,16 @@ curve cannot diverge.
 Step Split Override, Accelerated 50/50 Sigma Override, and Shift Override are
 order-independent. Each stores its requested override in the plan and rebuilds
 from the original planner controls.
+
+For progressive-upscale style workflows, a clear ordering is:
+
+```text
+Sampling Plan → Accelerated 50/50 Sigma Override → Step Split Override → Sigma Breakout
+```
+
+With that order, `steps_high = 0` keeps the accelerated 50/50 sigma plan, while
+any positive `steps_high` value manually overrides the split within that
+accelerated total.
 
 ### Model Pair Breakout
 

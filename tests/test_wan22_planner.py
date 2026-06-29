@@ -251,6 +251,13 @@ class OverrideTests(unittest.TestCase):
         self.assertEqual((plan["steps_high"], plan["steps_low"]), (6, 4))
         self.assertEqual(plan["overrides"], {"steps_high": 6})
 
+    def test_zero_step_override_is_passthrough(self):
+        base = build()
+        plan = build(forced_steps_high=0)
+        self.assertEqual((plan["steps_high"], plan["steps_low"]), (5, 5))
+        self.assertEqual(plan["overrides"], {})
+        self.assertEqual(list(plan["sigmas"]), list(base["sigmas"]))
+
     def test_shift_override_rebuilds_share_and_curve(self):
         plan = build(forced_shift=6.5)
         self.assertEqual(plan["shift"], 6.5)
@@ -335,7 +342,6 @@ class OverrideTests(unittest.TestCase):
 
     def test_invalid_overrides_are_rejected(self):
         for arguments in (
-            {"forced_steps_high": 0},
             {"forced_steps_high": 10},
             {"forced_shift": float("nan")},
             {"forced_shift": 101},

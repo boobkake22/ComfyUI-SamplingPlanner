@@ -538,6 +538,12 @@ def build_plan(
         raise ValueError("accelerated_steps must be at least 2.")
     if full_steps < 2:
         raise ValueError("full_steps must be at least 2.")
+    if forced_steps_high is not None:
+        forced_steps_high = int(forced_steps_high)
+        if forced_steps_high == 0:
+            forced_steps_high = None
+        elif forced_steps_high < 0:
+            raise ValueError("forced_steps_high must be zero or a positive integer.")
 
     profile_data = TASK_PROFILES[task]
     boundary = float(profile_data["boundary"])
@@ -627,7 +633,6 @@ def build_plan(
         steps_low = accelerated_steps - steps_high
 
     if forced_steps_high is not None:
-        forced_steps_high = int(forced_steps_high)
         projected_total = steps_high + steps_low
         if not 1 <= forced_steps_high < projected_total:
             raise ValueError(

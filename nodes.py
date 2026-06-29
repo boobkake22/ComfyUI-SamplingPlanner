@@ -634,13 +634,14 @@ class StepSplitOverride:
                 "steps_high": (
                     "INT",
                     {
-                        "default": 5,
-                        "min": 1,
+                        "default": 0,
+                        "min": 0,
                         "max": 9999,
                         "step": 1,
                         "tooltip": (
                             "Exact number of sampling transitions assigned to "
-                            "the high-noise expert."
+                            "the high-noise expert. Use 0 to pass the plan "
+                            "through unchanged."
                         ),
                     },
                 ),
@@ -653,7 +654,11 @@ class StepSplitOverride:
     CATEGORY = CATEGORY
 
     def override_split(self, plan, steps_high):
-        revised = _rebuild_plan(plan, steps_high=int(steps_high))
+        steps_high = int(steps_high)
+        revised = _rebuild_plan(
+            plan,
+            steps_high=None if steps_high == 0 else steps_high,
+        )
         print(f"Step Split Override: {revised['summary']}")
         return _ui_result(revised, revised)
 
