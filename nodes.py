@@ -4,14 +4,10 @@ from typing import Any
 
 import comfy.samplers
 from comfy_extras.nodes_model_advanced import ModelSamplingSD3
-from comfy_extras.nodes_custom_sampler import Noise_EmptyNoise, Noise_RandomNoise
 
 from .wan22_planner import (
     ACCELERATION_BOTH,
     ACCELERATION_OPTIONS,
-    HANDOFF_DIRECT,
-    HANDOFF_OPTIONS,
-    HANDOFF_PROGRESSIVE,
     PLAN_TYPE,
     PRIORITY_BALANCED,
     PRIORITY_OPTIONS,
@@ -95,12 +91,6 @@ class _PrioritySelectorReturnTypes:
         return (PRIORITY_OPTIONS,)
 
 
-class _HandoffSelectorReturnTypes:
-    def __get__(self, instance, owner):
-        del instance, owner
-        return (HANDOFF_OPTIONS,)
-
-
 class _AccelerationSelectorReturnTypes:
     def __get__(self, instance, owner):
         del instance, owner
@@ -134,7 +124,6 @@ def _acceleration_state(plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "type": ACCELERATION_STATE_TYPE,
         "mode": plan["acceleration"],
-        "handoff_mode": plan["handoff_mode"],
         "accelerate_high": plan["accelerate_high"],
         "accelerate_low": plan["accelerate_low"],
     }
@@ -152,7 +141,6 @@ def _rebuild_plan(plan: Any, **override_updates: Any) -> dict[str, Any]:
         full_steps=source["full_steps"],
         scheduler=source["scheduler"],
         priority=source["priority"],
-        handoff_mode=source.get("handoff_mode", HANDOFF_DIRECT),
         sigma_provider=_sigma_provider(source["model"]),
         forced_steps_high=overrides.get("steps_high"),
         forced_shift=overrides.get("shift"),
@@ -238,18 +226,6 @@ class SamplingPlanWan22:
                         ),
                     },
                 ),
-                "handoff_mode": (
-                    HANDOFF_OPTIONS,
-                    {
-                        "default": HANDOFF_DIRECT,
-                        "tooltip": (
-                            "Direct Latent continues the high latent into the low "
-                            "stage with low noise disabled. Progressive Transcode "
-                            "cleans the high output for decode/upscale/re-encode, "
-                            "then re-noises the low stage at the handoff."
-                        ),
-                    },
-                ),
             }
         }
 
@@ -266,7 +242,6 @@ class SamplingPlanWan22:
         step_budget,
         scheduler,
         priority,
-        handoff_mode=HANDOFF_DIRECT,
     ):
         step_budget = _validate_step_budget(step_budget)
         plan = build_plan(
@@ -277,7 +252,6 @@ class SamplingPlanWan22:
             full_steps=step_budget["full_steps"],
             scheduler=scheduler,
             priority=priority,
-            handoff_mode=handoff_mode,
             sigma_provider=_sigma_provider(model),
         )
         print(f"Sampling Plan (Wan 2.2): {plan['summary']}")
@@ -423,40 +397,6 @@ class PrioritySelector:
         if priority not in PRIORITY_OPTIONS:
             raise ValueError(f"Unknown priority: {priority}")
         return (priority,)
-
-
-class HandoffSelector:
-    DESCRIPTION = (
-        "Selects how the high-noise stage hands off to the low-noise stage."
-    )
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "handoff_mode": (
-                    HANDOFF_OPTIONS,
-                    {
-                        "default": HANDOFF_DIRECT,
-                        "tooltip": (
-                            "Direct Latent is a normal high-to-low continuation. "
-                            "Progressive Transcode is for decode/upscale/re-encode "
-                            "between stages and re-noises the low stage."
-                        ),
-                    },
-                )
-            }
-        }
-
-    RETURN_TYPES = _HandoffSelectorReturnTypes()
-    RETURN_NAMES = ("handoff_mode",)
-    FUNCTION = "select_handoff"
-    CATEGORY = HELPER_CATEGORY
-
-    def select_handoff(self, handoff_mode):
-        if handoff_mode not in HANDOFF_OPTIONS:
-            raise ValueError(f"Unknown handoff mode: {handoff_mode}")
-        return (handoff_mode,)
 
 
 class StepBudget:
@@ -821,79 +761,6 @@ class ModelPairBreakout:
         )
 
 
-class CustomSamplerBreakout:
-    DESCRIPTION = (
-        "Exposes the noise objects and sigma schedules for a two-stage "
-        "SamplerCustomAdvanced Wan 2.2 branch."
-    )
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "plan": (PLAN_TYPE,),
-                "noise_seed": (
-                    "INT",
-                    {
-                        "default": 0,
-                        "min": 0,
-                        "max": 0xFFFFFFFFFFFFFFFF,
-                        "control_after_generate": True,
-                        "tooltip": (
-                            "Seed used for the high stage, and for the low stage "
-                            "when Progressive Transcode needs to re-noise."
-                        ),
-                    },
-                ),
-            }
-        }
-
-    RETURN_TYPES = (
-        "NOISE",
-        "NOISE",
-        "SIGMAS",
-        "SIGMAS",
-        "INT",
-        "INT",
-        "INT",
-        "FLOAT",
-        PLAN_TYPE,
-    )
-    RETURN_NAMES = (
-        "noise_high",
-        "noise_low",
-        "sigmas_high",
-        "sigmas_low",
-        "steps",
-        "steps_high",
-        "steps_low",
-        "shift",
-        "plan",
-    )
-    FUNCTION = "breakout"
-    CATEGORY = CATEGORY
-
-    def breakout(self, plan, noise_seed):
-        plan = validate_plan(plan)
-        if plan["noise_low_mode"] == "random":
-            noise_low = Noise_RandomNoise(int(noise_seed))
-        else:
-            noise_low = Noise_EmptyNoise()
-
-        return _ui_result(
-            plan,
-            Noise_RandomNoise(int(noise_seed)),
-            noise_low,
-            plan["sigmas_high_sampling"],
-            plan["sigmas_low"],
-            plan["steps"],
-            plan["steps_high"],
-            plan["steps_low"],
-            float(plan["shift"]),
-            plan,
-        )
-
-
 class KSamplerBreakout:
     DESCRIPTION = (
         "Prepares a high/low Wan 2.2 model pair and exposes the coordinated "
@@ -953,13 +820,6 @@ class KSamplerBreakout:
 
     def breakout(self, plan, model_high, model_low, sampler):
         plan = validate_plan(plan)
-        if plan.get("handoff_mode") == HANDOFF_PROGRESSIVE:
-            raise ValueError(
-                "Progressive Transcode needs terminal high output and low-stage "
-                "re-noise controls. Use Custom Sampler Breakout with "
-                "SamplerCustomAdvanced, or wire KSampler Advanced add_noise / "
-                "return_with_leftover_noise manually."
-            )
         if plan.get("curve_mode") != "exact":
             raise ValueError(
                 "This plan uses a piecewise sigma curve and cannot be represented "
@@ -1031,7 +891,7 @@ class SigmaBreakout:
         plan = validate_plan(plan)
         return _ui_result(
             plan,
-            plan["sigmas_high_sampling"],
+            plan["sigmas_high"],
             plan["sigmas_low"],
             plan["sigmas"],
             plan["steps"],
@@ -1047,7 +907,6 @@ NODE_CLASS_MAPPINGS = {
     "SamplerSelector": SamplerSelector,
     "TaskSelector": TaskSelector,
     "PrioritySelector": PrioritySelector,
-    "HandoffSelector": HandoffSelector,
     "StepBudget": StepBudget,
     "AccelerationSelector": AccelerationSelector,
     "AccelerationModelPair": AccelerationModelPair,
@@ -1056,7 +915,6 @@ NODE_CLASS_MAPPINGS = {
     "RangeSplitOverrideLegacy": RangeSplitOverrideLegacy,
     "ShiftOverride": ShiftOverride,
     "ModelPairBreakout": ModelPairBreakout,
-    "CustomSamplerBreakout": CustomSamplerBreakout,
     "KSamplerBreakout": KSamplerBreakout,
     "SigmaBreakout": SigmaBreakout,
 }
@@ -1066,7 +924,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SamplerSelector": "Sampler Selector",
     "TaskSelector": "Task Selector",
     "PrioritySelector": "Priority Selector",
-    "HandoffSelector": "Handoff Selector",
     "StepBudget": "Step Budget",
     "AccelerationSelector": "Acceleration Selector",
     "AccelerationModelPair": "Acceleration Model Pair",
@@ -1075,7 +932,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "RangeSplitOverrideLegacy": "Range Split Override (Legacy)",
     "ShiftOverride": "Shift Override",
     "ModelPairBreakout": "Model Pair Breakout",
-    "CustomSamplerBreakout": "Custom Sampler Breakout",
     "KSamplerBreakout": "KSampler Breakout",
     "SigmaBreakout": "Sigma Breakout",
 }
