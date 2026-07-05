@@ -296,6 +296,34 @@ native KSampler Advanced implementation own `start_at_step`, `end_at_step`, and
 `return_with_leftover_noise`, which is the closest match to legacy two-KSampler
 branches.
 
+### MoE Sampler Breakout
+
+Adapts the plan for single-node MoE samplers such as `WanMoeKSampler`
+(stduhpf/ComfyUI-WanMoeKSampler). Connect the plan and the high/low expert
+models (typically from Acceleration Model Pair):
+
+```text
+model_high -> MoE sampler model_high_noise (patched with the plan's shift)
+model_low  -> MoE sampler model_low_noise  (patched with the plan's shift)
+steps      -> MoE sampler steps
+shift      -> MoE sampler sigma_shift
+boundary   -> MoE sampler boundary (the plan's task boundary: T2V 0.875 / I2V 0.900)
+```
+
+Drive the MoE sampler's `sampler_name` and `scheduler` inputs from the same
+Sampler Selector and Scheduler Selector that feed the Sampling Plan so the
+sampler's internally generated curve matches the planned curve.
+
+Unlike KSampler Breakout, this node never rejects a plan: the MoE sampler
+rebuilds a native scheduler curve from steps and shift and hands off experts
+where that curve crosses the boundary sigma, so exact representability is not
+required. Because the planner solves shift against the same task boundary, an
+`exact` plan's handoff lands on the planned split step; for `piecewise` plans
+the curve is approximated best-effort at the planned shift (the split may land
+a step away from the plan's allocation) and the node's summary notes the
+approximation. Step Split Override and priority choices influence this path
+only through the solved shift.
+
 ### Sigma Breakout
 
 Exposes:

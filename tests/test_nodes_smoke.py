@@ -117,6 +117,7 @@ class NodeSmokeTests(unittest.TestCase):
                 "ShiftOverride",
                 "ModelPairBreakout",
                 "KSamplerBreakout",
+                "MoeSamplerBreakout",
                 "SigmaBreakout",
             },
         )
@@ -473,6 +474,60 @@ class NodeSmokeTests(unittest.TestCase):
                 FakeModel(),
                 "custom_sampler",
             )
+
+    def test_moe_sampler_breakout_accepts_piecewise_plans(self):
+        plan_node = self.nodes.SamplingPlanWan22()
+        budget = self.nodes.StepBudget().create_budget(10, 30)[0]
+        piecewise_plan = plan_node.create_plan(
+            FakeModel(),
+            "T2V",
+            "High + Low",
+            budget,
+            "simple",
+            "Balanced",
+        )["result"][0]
+        self.assertNotEqual(piecewise_plan["curve_mode"], "exact")
+
+        moe = self.nodes.MoeSamplerBreakout()
+        outcome = moe.breakout(piecewise_plan, FakeModel(), FakeModel())
+        result = outcome["result"]
+        self.assertEqual(len(result), 6)
+        self.assertAlmostEqual(result[0].shift, piecewise_plan["shift"])
+        self.assertAlmostEqual(result[1].shift, piecewise_plan["shift"])
+        self.assertEqual(result[2], piecewise_plan["steps"])
+        self.assertAlmostEqual(result[3], piecewise_plan["shift"])
+        self.assertAlmostEqual(result[4], piecewise_plan["boundary"])
+        self.assertIs(result[5], piecewise_plan)
+        self.assertIn("approximated", outcome["ui"]["text"][0])
+
+        exact_plan = plan_node.create_plan(
+            FakeModel(),
+            "I2V",
+            "High + Low",
+            budget,
+            "simple",
+            "Balanced",
+        )["result"][0]
+        self.assertEqual(exact_plan["curve_mode"], "exact")
+        outcome = moe.breakout(exact_plan, FakeModel(), FakeModel())
+        self.assertNotIn("approximated", outcome["ui"]["text"][0])
+        self.assertAlmostEqual(outcome["result"][4], 0.900)
+
+    def test_moe_sampler_breakout_boundary_tracks_task(self):
+        plan_node = self.nodes.SamplingPlanWan22()
+        budget = self.nodes.StepBudget().create_budget(10, 30)[0]
+        moe = self.nodes.MoeSamplerBreakout()
+        for task, expected_boundary in (("T2V", 0.875), ("I2V", 0.900)):
+            plan = plan_node.create_plan(
+                FakeModel(),
+                task,
+                "High + Low",
+                budget,
+                "simple",
+                "Balanced",
+            )["result"][0]
+            result = moe.breakout(plan, FakeModel(), FakeModel())["result"]
+            self.assertAlmostEqual(result[4], expected_boundary)
 
     def test_override_nodes_expose_compact_exact_controls(self):
         split = self.nodes.StepSplitOverride.INPUT_TYPES()["required"]

@@ -922,6 +922,58 @@ class KSamplerBreakout:
         )
 
 
+class MoeSamplerBreakout:
+    DESCRIPTION = (
+        "Adapts a Wan 2.2 sampling plan for single-node MoE samplers such as "
+        "WanMoeKSampler. The MoE sampler rebuilds a native scheduler curve "
+        "from steps and shift and hands off experts at the plan's task "
+        "boundary sigma, so exact curve representability is not required: "
+        "piecewise plans are applied best-effort instead of rejected."
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "plan": (PLAN_TYPE,),
+                "model_high": (
+                    "MODEL",
+                    {"tooltip": "Wan 2.2 high-noise expert model."},
+                ),
+                "model_low": (
+                    "MODEL",
+                    {"tooltip": "Wan 2.2 low-noise expert model."},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("MODEL", "MODEL", "INT", "FLOAT", "FLOAT", PLAN_TYPE)
+    RETURN_NAMES = ("model_high", "model_low", "steps", "shift", "boundary", "plan")
+    FUNCTION = "breakout"
+    CATEGORY = CATEGORY
+
+    def breakout(self, plan, model_high, model_low):
+        plan = validate_plan(plan)
+        shift = float(plan["shift"])
+        summary = plan["summary"]
+        if plan.get("curve_mode") != "exact":
+            summary += (
+                "\nMoE: the piecewise plan curve is approximated by the "
+                "sampler's native scheduler curve at the planned shift."
+            )
+        return {
+            "ui": {"text": [summary]},
+            "result": (
+                _patch_model(model_high, shift),
+                _patch_model(model_low, shift),
+                plan["steps"],
+                shift,
+                float(plan["boundary"]),
+                plan,
+            ),
+        }
+
+
 class SigmaBreakout:
     DESCRIPTION = (
         "Exposes the complete, high-noise, and low-noise sigma schedules from "
@@ -985,6 +1037,7 @@ NODE_CLASS_MAPPINGS = {
     "ShiftOverride": ShiftOverride,
     "ModelPairBreakout": ModelPairBreakout,
     "KSamplerBreakout": KSamplerBreakout,
+    "MoeSamplerBreakout": MoeSamplerBreakout,
     "SigmaBreakout": SigmaBreakout,
 }
 
@@ -1003,5 +1056,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ShiftOverride": "Shift Override",
     "ModelPairBreakout": "Model Pair Breakout",
     "KSamplerBreakout": "KSampler Breakout",
+    "MoeSamplerBreakout": "MoE Sampler Breakout",
     "SigmaBreakout": "Sigma Breakout",
 }
