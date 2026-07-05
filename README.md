@@ -183,8 +183,21 @@ recommended way to leave the node visibly in-chain without applying a manual
 split.
 
 Set `steps_high` to a positive value to replace Priority's calculated high-stage
-transition count while preserving the plan's effective total. The complete curve
-and both sigma slices are rebuilt and validated.
+transition count. The complete curve and both sigma slices are rebuilt and
+validated.
+
+How the remaining steps are handled depends on the acceleration mode:
+
+- **Uniform budgets** (`High + Low` or `None`): both stages draw from one
+  budget, so the forced value moves the split point while preserving the
+  plan's effective total.
+- **Mixed acceleration** (`High only` / `Low only`): the stages draw from
+  different budgets, so the forced value overrides the high allocation only
+  and the low stage keeps its own budget share. For example, `Low only` with
+  budgets A10/F30 plans 14 high + 5 low; forcing `steps_high = 5` yields
+  5 high + 5 low rather than redistributing the remainder into the
+  accelerated CFG-1 low stage. The forced value may use up to the full
+  high-stage budget.
 
 ### Progressive 50/50 Sigma Control
 

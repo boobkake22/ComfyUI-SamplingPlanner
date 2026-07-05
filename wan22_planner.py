@@ -633,14 +633,30 @@ def build_plan(
         steps_low = accelerated_steps - steps_high
 
     if forced_steps_high is not None:
-        projected_total = steps_high + steps_low
-        if not 1 <= forced_steps_high < projected_total:
-            raise ValueError(
-                "forced_steps_high must leave at least one low-noise transition; "
-                f"expected 1..{projected_total - 1}, got {forced_steps_high}."
-            )
-        steps_high = forced_steps_high
-        steps_low = projected_total - steps_high
+        if high_budget == low_budget:
+            # Both stages draw from one budget: the forced value moves the
+            # split point within the same total.
+            projected_total = steps_high + steps_low
+            if not 1 <= forced_steps_high < projected_total:
+                raise ValueError(
+                    "forced_steps_high must leave at least one low-noise transition; "
+                    f"expected 1..{projected_total - 1}, got {forced_steps_high}."
+                )
+            steps_high = forced_steps_high
+            steps_low = projected_total - steps_high
+        else:
+            # Mixed acceleration: the stages draw from different budgets, so
+            # redistributing the remainder would move steps across the budget
+            # boundary (e.g. inflating an accelerated CFG-1 low stage). The
+            # forced value overrides the high allocation only; the low stage
+            # keeps its own budget share.
+            if not 1 <= forced_steps_high <= high_budget:
+                raise ValueError(
+                    "forced_steps_high cannot exceed the high-noise stage budget "
+                    f"under mixed acceleration; expected 1..{high_budget}, "
+                    f"got {forced_steps_high}."
+                )
+            steps_high = forced_steps_high
 
     steps = steps_high + steps_low
     exact_sigmas, exact_values = _provided_sigmas(

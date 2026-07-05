@@ -251,6 +251,25 @@ class OverrideTests(unittest.TestCase):
         self.assertEqual((plan["steps_high"], plan["steps_low"]), (6, 4))
         self.assertEqual(plan["overrides"], {"steps_high": 6})
 
+    def test_exact_step_override_mixed_acceleration_keeps_low_share(self):
+        base = build(acceleration=ACCELERATION_LOW)
+        self.assertEqual((base["steps_high"], base["steps_low"]), (14, 5))
+
+        plan = build(acceleration=ACCELERATION_LOW, forced_steps_high=5)
+        self.assertEqual((plan["steps_high"], plan["steps_low"]), (5, 5))
+        self.assertEqual(plan["steps"], 10)
+        self.assertEqual(plan["overrides"], {"steps_high": 5})
+
+        high_only_base = build(acceleration=ACCELERATION_HIGH)
+        high_only = build(acceleration=ACCELERATION_HIGH, forced_steps_high=3)
+        self.assertEqual(high_only["steps_high"], 3)
+        self.assertEqual(high_only["steps_low"], high_only_base["steps_low"])
+
+        # The forced value may use the whole high-stage budget, but not more.
+        build(acceleration=ACCELERATION_LOW, forced_steps_high=30)
+        with self.assertRaisesRegex(ValueError, "high-noise stage budget"):
+            build(acceleration=ACCELERATION_LOW, forced_steps_high=31)
+
     def test_zero_step_override_is_passthrough(self):
         base = build()
         plan = build(forced_steps_high=0)
